@@ -294,9 +294,10 @@ public class Keys {
     private final String account;
     private final String namespace;
     private final String name;
+    private final String tag;
 
     protected InfrastructureCacheKey(String[] parts) {
-      if (parts.length != 6) {
+      if (parts.length != 6 && parts.length != 7) {
         throw new IllegalArgumentException(
             "Malformed infrastructure key " + Arrays.toString(parts));
       }
@@ -305,6 +306,21 @@ public class Keys {
       account = parts[3];
       namespace = parts[4];
       name = parts[5];
+
+      if (parts.length == 7) {
+        tag = parts[6];
+      } else {
+        tag = "";
+      }
+    }
+
+    public InfrastructureCacheKey(
+        KubernetesKind kubernetesKind, String account, String namespace, String name) {
+      this.kubernetesKind = kubernetesKind;
+      this.account = account;
+      this.namespace = namespace;
+      this.name = name;
+      this.tag = "";
     }
 
     public InfrastructureCacheKey(KubernetesManifest manifest, String account) {
