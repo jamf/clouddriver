@@ -176,6 +176,7 @@ public class KubernetesCacheDataConverter {
     KubernetesApiVersion apiVersion = manifest.getApiVersion();
     String name = manifest.getName();
     String namespace = manifest.getNamespace();
+    String tag = manifest.getImageTag();
     Namer<KubernetesManifest> namer =
         account == null
             ? new KubernetesManifestNamer()
@@ -195,9 +196,10 @@ public class KubernetesCacheDataConverter {
             .put("manifest", manifest)
             .put("moniker", moniker)
             .put("application", cachingProperties.getApplication())
+            .put("image", tag)
             .build();
 
-    Keys.CacheKey key = new Keys.InfrastructureCacheKey(kind, account, namespace, name);
+    Keys.CacheKey key = new Keys.InfrastructureCacheKey(kind, account, namespace, name, tag);
     kubernetesCacheData.addItem(key, attributes);
 
     String application = moniker.getApp();
