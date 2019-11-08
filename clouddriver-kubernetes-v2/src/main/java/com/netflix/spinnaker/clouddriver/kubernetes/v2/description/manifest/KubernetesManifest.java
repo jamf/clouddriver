@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import lombok.Data;
@@ -318,6 +319,70 @@ public class KubernetesManifest extends HashMap<String, Object> {
 
   public static String getFullResourceName(KubernetesKind kind, String name) {
     return String.join(" ", kind.toString(), name);
+  }
+
+  private String getTagKey(List<Map<String, Object>> containers, String filter) {
+    List<String> images =
+        containers.stream()
+            .map((m) -> m.get("image").toString())
+            .filter((f) -> f.lastIndexOf(filter) != -1)
+            .collect(Collectors.toList());
+
+    if (images.size() == 0) {
+      if (filter == "") {
+        return "";
+      }
+      return getTagKey(containers, "");
+    }
+
+    String stringImage = images.get(0);
+    String tag = stringImage.substring(stringImage.lastIndexOf(':') + 1);
+
+    return tag;
+  }
+
+  @JsonIgnore
+  public String getImageTag() {
+    if (!containsKey("spec")) {
+      return "";
+    }
+
+    List<Map<String, Object>> initContainers = new ArrayList<>();
+
+    Map<String, Object> spec = (Map<String, Object>) get("spec");
+    if (spec.containsKey("containers")) {
+      if (spec.containsKey("initContainers")) {
+        initContainers = (List<Map<String, Object>>) spec.get("initContainers");
+      }
+      List<Map<String, Object>> containers = (List<Map<String, Object>>) spec.get("containers");
+      containers.addAll(initContainers);
+      return getTagKey(containers, "jamfpro-war");
+    }
+    if (!spec.containsKey("template")) {
+      return "";
+    }
+
+    Map<String, Object> template = (Map<String, Object>) spec.get("template");
+    if (!template.containsKey("metadata")) {
+      return "";
+    }
+
+    Map<String, Object> templateSpec = (Map<String, Object>) template.get("spec");
+    if (templateSpec == null) {
+      return "";
+    }
+
+    if (templateSpec.containsKey("initContainers")) {
+      initContainers = (List<Map<String, Object>>) templateSpec.get("initContainers");
+    }
+    List<Map<String, Object>> containers =
+        (List<Map<String, Object>>) templateSpec.get("containers");
+    if (containers.size() == 0) {
+      return "";
+    }
+
+    containers.addAll(initContainers);
+    return getTagKey(containers, "jamfpro-war");
   }
 
   @JsonIgnore
