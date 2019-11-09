@@ -1,0 +1,21 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches:
+      - jamf
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v1
+      - name: Build the Docker image
+        run: |
+          docker build . --file Dockerfile.compile -t compile
+      - name: Build slim image
+        run: |
+          export TAG=$(date +%s)
+          docker build . --file Dockerfile.slim -t gcr.io/spinnaker-jamf-services-b9cb/clouddriver:${TAG}
+          echo '${{secrets.GCLOUD_GCR_SERVICE_ACCOUNT_KEY}}' | docker login -u _json_key --password-stdin https://gcr.io/spinnaker-jamf-services-b9cb
+          docker push gcr.io/spinnaker-jamf-services-b9cb/clouddriver:${TAG}
