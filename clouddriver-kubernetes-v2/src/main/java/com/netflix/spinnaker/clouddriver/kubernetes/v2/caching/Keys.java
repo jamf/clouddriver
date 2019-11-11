@@ -338,7 +338,7 @@ public class Keys {
 
     @Override
     public String toString() {
-      return createKeyFromParts(kind, kubernetesKind, account, namespace, name);
+      return createKeyFromParts(kind, kubernetesKind, account, namespace, name, tag);
     }
 
     @Override
