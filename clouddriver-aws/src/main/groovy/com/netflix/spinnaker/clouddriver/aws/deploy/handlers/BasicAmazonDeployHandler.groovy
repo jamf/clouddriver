@@ -221,11 +221,6 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
         }
       }
 
-      // Get default block device mapping for requested instance type.
-      // For the case of multiple instance types in request, top-level instance type is used to derive defaults.
-      if (description.blockDevices == null) {
-        description.blockDevices = blockDeviceConfig.getBlockDevicesForInstanceType(description.instanceType)
-      }
       ResolvedAmiResult ami = priorOutputs.find({
         it instanceof ResolvedAmiResult && it.region == region && (it.amiName == description.amiName || it.amiId == description.amiName)
       }) ?: AmiIdResolver.resolveAmiIdFromAllSources(amazonEC2, region, description.amiName, description.credentials.accountId)
@@ -241,7 +236,11 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
       }
 
       if (description.useAmiBlockDeviceMappings) {
-        description.blockDevices = AsgConfigHelper.transformBlockDeviceMapping(ami.blockDeviceMappings)
+        description.blockDevices = AsgConfigHelper.convertBlockDevices(ami.blockDeviceMappings)
+      } else if(description.blockDevices == null){
+        // Get default block device mapping for requested instance type.
+        // For the case of multiple instance types in request, top-level instance type is used to derive defaults.
+        description.blockDevices = blockDeviceConfig.getBlockDevicesForInstanceType(description.instanceType)
       }
 
       if (description.spotPrice == "") {
@@ -302,6 +301,7 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
         lifecycleHooks: getLifecycleHooks(account, description),
         setLaunchTemplate: description.setLaunchTemplate,
         requireIMDSv2: description.requireIMDSv2,
+        enableEnclave: description.enableEnclave,
         associateIPv6Address: description.associateIPv6Address,
         unlimitedCpuCredits: description.unlimitedCpuCredits != null
           ? description.unlimitedCpuCredits
@@ -313,7 +313,8 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
         onDemandPercentageAboveBaseCapacity: description.onDemandPercentageAboveBaseCapacity,
         spotAllocationStrategy: description.spotAllocationStrategy,
         spotInstancePools: description.spotInstancePools,
-        launchTemplateOverridesForInstanceType: description.launchTemplateOverridesForInstanceType
+        launchTemplateOverridesForInstanceType: description.launchTemplateOverridesForInstanceType,
+        capacityRebalance: description.capacityRebalance
       )
 
       def asgName = autoScalingWorker.deploy(asgConfig)
@@ -581,8 +582,6 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
    * @param newAsgDescription description in request
    * @return a list of {@link AmazonBlockDevice} for the requested configuration
    */
-  @VisibleForTesting
-  @PackageScope
   List<AmazonBlockDevice> buildBlockDeviceMappingsFromSourceAsg(
     RegionScopedProviderFactory.RegionScopedProvider sourceAsgRegionScopedProvider,
     AutoScalingGroup sourceAsg,
@@ -593,7 +592,7 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
       return newAsgDescription.blockDevices
     }
 
-    if (newAsgDescription.getAllowedInstanceTypes() != AsgConfigHelper.getAllowedInstanceTypesForAsg(sourceAsg, sourceAsgRegionScopedProvider)) {
+    if (newAsgDescription.getInstanceType() != AsgConfigHelper.getTopLevelInstanceTypeForAsg(sourceAsg, sourceAsgRegionScopedProvider)) {
       // If instance type(s) being requested is NOT the same as those in source ASG,
       // get default mapping for the new type ONLY IF that same logic was applied for source ASG.
       // For the case of multiple instance types in request, top-level instance type is used to derive defaults.
@@ -607,7 +606,8 @@ class BasicAmazonDeployHandler implements DeployHandler<BasicAmazonDeployDescrip
           .collect { [deviceName: it.deviceName, virtualName: it.virtualName, size: it.size] }
           .sort { it.deviceName }
 
-      if (blockDevicesForSourceAsg == defaultBlockDevicesForSourceInsType) {
+      boolean isDefaultMappingUsedInSourceAsg = blockDevicesForSourceAsg == defaultBlockDevicesForSourceInsType
+      if (isDefaultMappingUsedInSourceAsg) {
         return blockDeviceConfig.getBlockDevicesForInstanceType(newAsgDescription.getInstanceType())
       }
     }

@@ -29,12 +29,14 @@ import com.netflix.spinnaker.clouddriver.aws.provider.AwsProvider
 import com.netflix.spinnaker.clouddriver.core.provider.agent.ExternalHealthProvider
 import com.netflix.spinnaker.clouddriver.model.ClusterProvider
 import com.netflix.spinnaker.clouddriver.model.ServerGroupProvider
+import groovy.util.logging.Slf4j
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 
 import static com.netflix.spinnaker.clouddriver.core.provider.agent.Namespace.*
 
+@Slf4j
 @Component
 class AmazonClusterProvider implements ClusterProvider<AmazonCluster>, ServerGroupProvider {
 
@@ -575,8 +577,13 @@ class AmazonClusterProvider implements ClusterProvider<AmazonCluster>, ServerGro
   private static void populateServerGroupWithLtOrMip(AmazonServerGroup serverGroup, CacheData launchData) {
 
     // get launch template for version specified
-    def ltVersionStr = serverGroup.getLaunchTemplateSpecification()["version"] as String
-    Map ec2Lt = getLaunchTemplateForVersion(launchData, ltVersionStr)
+    def ltSpec = serverGroup.getLaunchTemplateSpecification()
+    log.debug("Attempting to populate server group $serverGroup.name with launch template $ltSpec.")
+    Map ec2Lt = getLaunchTemplateForVersion(launchData, ltSpec["version"] as String)
+
+    if (!ec2Lt) {
+      return
+    }
 
     if (serverGroup.asg?.launchTemplate) {
       serverGroup.launchTemplate = ec2Lt
@@ -592,20 +599,20 @@ class AmazonClusterProvider implements ClusterProvider<AmazonCluster>, ServerGro
         }
       } else {
         // multiple instance types case
-        def overrides = mip["launchTemplate"]["overrides"]
+        def overrides = new ArrayList<>(mip["launchTemplate"]["overrides"])
         def types = []
         overrides.each {
           types.add(it["instanceType"])
         }
 
         // launchTemplate#instanceType is ignored when it is overridden. So, remove it to prevent accidental misuse / ambiguity.
-        Map ec2LtMinusType = getLaunchTemplateForVersion(launchData, ltVersionStr)
-        ec2LtMinusType["launchTemplateData"].remove("instanceType")
+        Map ec2LtDataMinusType = ec2Lt?."launchTemplateData".findAll {it.key != "instanceType"}
+        ec2Lt?.replace("launchTemplateData", ec2LtDataMinusType)
 
         serverGroup.mixedInstancesPolicy = new AmazonServerGroup.MixedInstancesPolicySettings().tap {
           allowedInstanceTypes = types.sort()
           instancesDiversification = serverGroup.asg.mixedInstancesPolicy["instancesDistribution"]
-          launchTemplates = [ ec2LtMinusType ]
+          launchTemplates = [ ec2Lt ]
           launchTemplateOverridesForInstanceType = overrides
         }
       }

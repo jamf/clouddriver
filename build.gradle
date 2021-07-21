@@ -38,9 +38,6 @@ plugins {
 }
 
 allprojects {
-  repositories {
-    jcenter()
-  }
   apply plugin: 'io.spinnaker.project'
 }
 

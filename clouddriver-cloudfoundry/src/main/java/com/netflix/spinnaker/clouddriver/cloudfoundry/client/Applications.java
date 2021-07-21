@@ -31,6 +31,7 @@ import com.netflix.spinnaker.clouddriver.cloudfoundry.client.api.ApplicationServ
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v2.ApplicationEnv;
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v2.MapRoute;
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v2.Resource;
+import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v2.ServiceBinding;
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v3.*;
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v3.Package;
 import com.netflix.spinnaker.clouddriver.cloudfoundry.client.model.v3.Process;
@@ -60,6 +61,7 @@ public class Applications {
   private final Spaces spaces;
   private final Processes processes;
   private final Integer resultsPerPage;
+  private final boolean onlySpinnakerManaged;
   private final ForkJoinPool forkJoinPool;
   private final LoadingCache<String, CloudFoundryServerGroup> serverGroupCache;
 
@@ -71,6 +73,7 @@ public class Applications {
       Spaces spaces,
       Processes processes,
       Integer resultsPerPage,
+      boolean onlySpinnakerManaged,
       ForkJoinPool forkJoinPool) {
     this.account = account;
     this.appsManagerUri = appsManagerUri;
@@ -79,6 +82,7 @@ public class Applications {
     this.spaces = spaces;
     this.processes = processes;
     this.resultsPerPage = resultsPerPage;
+    this.onlySpinnakerManaged = onlySpinnakerManaged;
     this.forkJoinPool = forkJoinPool;
     this.serverGroupCache =
         CacheBuilder.newBuilder()
@@ -189,6 +193,15 @@ public class Applications {
 
     for (CloudFoundryServerGroup serverGroup : serverGroupCache.asMap().values()) {
       Names names = Names.parseName(serverGroup.getName());
+
+      if (onlySpinnakerManaged && names.getSequence() == null) {
+        log.debug(
+            "Skipping app '{}' from foundation '{}' because onlySpinnakerManaged is true and it has no version.",
+            serverGroup.getName(),
+            this.account);
+        continue;
+      }
+
       if (names.getCluster() == null) {
         log.debug(
             "Skipping app '{}' from foundation '{}' because the name isn't following the frigga naming schema.",
@@ -329,13 +342,23 @@ public class Applications {
                     vcap ->
                         vcap.getValue().stream()
                             .map(
-                                instance ->
-                                    CloudFoundryServiceInstance.builder()
-                                        .serviceInstanceName(vcap.getKey())
-                                        .name(instance.getName())
-                                        .plan(instance.getPlan())
-                                        .tags(instance.getTags())
-                                        .build()))
+                                instance -> {
+                                  CloudFoundryServiceInstance.CloudFoundryServiceInstanceBuilder
+                                      cloudFoundryServiceInstanceBuilder =
+                                          CloudFoundryServiceInstance.builder()
+                                              .serviceInstanceName(vcap.getKey())
+                                              .name(instance.getName())
+                                              .plan(instance.getPlan())
+                                              .tags(instance.getTags());
+                                  if (instance.getLastOperation() != null
+                                      && instance.getLastOperation().getState() != null) {
+                                    cloudFoundryServiceInstanceBuilder
+                                        .status(instance.getLastOperation().getState().toString())
+                                        .lastOperationDescription(
+                                            instance.getLastOperation().getDescription());
+                                  }
+                                  return cloudFoundryServiceInstanceBuilder.build();
+                                }))
                 .collect(toList());
 
     Map<String, Object> environmentVars =
@@ -626,7 +649,7 @@ public class Applications {
       getTakenSlots(String clusterName, String spaceId) {
     String finalName = buildFinalAsgName(clusterName);
     List<String> filter =
-        asList("name<" + finalName, "name>=" + clusterName, "space_guid:" + spaceId);
+        asList("name<=" + finalName, "name>=" + clusterName, "space_guid:" + spaceId);
     return collectPageResources("applications", page -> api.listAppsFiltered(page, filter, 10))
         .stream()
         .filter(
@@ -659,5 +682,9 @@ public class Applications {
                                 CloudFoundryServerGroup.State.valueOf(application.getState())))
                     .map(appState -> ProcessStats.State.RUNNING)
                     .orElse(ProcessStats.State.DOWN));
+  }
+
+  public List<Resource<ServiceBinding>> getServiceBindingsByApp(String appGuid) {
+    return collectPageResources("service bindings", pg -> api.getServiceBindings(appGuid));
   }
 }
